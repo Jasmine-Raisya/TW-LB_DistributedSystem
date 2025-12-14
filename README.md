@@ -35,6 +35,9 @@ Create the virtual environment
 
 ## Step 3: Install Python Dependencies
 `pip install -r requirements.txt`
+the actual dependencies are: ..... just making sure yall r okay, i havent rechecked the requirements.txt
+`pip install prometheus-api_client pandas python-dotenv tabulate scikit-learn`
+
 - Activate the virtual environment (must be done before running scripts)
 `source venv/bin/activate`
 
