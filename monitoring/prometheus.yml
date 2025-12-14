@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 2s # Scrape fast for real-time data [cite: 43]
+
+scrape_configs:
+  - job_name: 'distributed_nodes'
+    metrics_path: /metrics
+    static_configs:
+      - targets: 
+        # Add all your nodes here
+        - 'node-1:8000'
+        - 'node-2:8000'
+        - 'node-3:8000'
+        - 'node-4:8000'
+        - 'node-5:8000'
+        - 'node-6:8000'
+        - 'node-7:8000'
+        - 'node-8:8000'
+        - 'node-9:8000'
+        - 'node-10:8000'
+        - 'node-11:8000'
+        - 'node-12:8000'
+        - 'node-13:8000'
+        - 'node-14:8000'
+        - 'node-15:8000'

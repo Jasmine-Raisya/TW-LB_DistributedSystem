@@ -1,0 +1,187 @@
+version: '3.8'
+
+services:
+  # --- 1. Prometheus Monitoring Server ---
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: prometheus_1
+    volumes:
+      # CORRECT CONFIG PATH: Maps your host's ./monitoring/prometheus.yml 
+      # to the container's expected config path.
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      # DATA VOLUME: Maps a persistent Docker volume for data storage.
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - tw_network
+    depends_on:
+      - tw-lb
+
+  # --- 2. Grafana Dashboard ---
+  grafana:
+    image: grafana/grafana:10.1.5
+    container_name: grafana_1
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - tw_network
+    depends_on:
+      - prometheus
+
+  # --- 3. Trust-Weighted Load Balancer ---
+  tw-lb:
+    build:
+      context: ./lb
+      dockerfile: Dockerfile
+    container_name: ds_project_tw-lb_1
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080"
+    networks:
+      - tw_network
+    # Dynamically depend on all 15 nodes
+    depends_on:
+      - node-1
+      - node-2
+      - node-3
+      - node-4
+      - node-5
+      - node-6
+      - node-7
+      - node-8
+      - node-9
+      - node-10
+      - node-11
+      - node-12
+      - node-13
+      - node-14
+      - node-15
+
+  # --- 4. Node Services (15 Replicas) ---
+  node-1: &node_base_template
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    container_name: node-1_1
+    env_file:
+      - ./.env
+    environment:
+      - NODE_ID=node-1
+      - NODE_PORT=8000
+    networks:
+      - tw_network
+
+  node-2:
+    <<: *node_base_template
+    container_name: node-2_1
+    environment:
+      - NODE_ID=node-2
+      - NODE_PORT=8000
+
+  node-3:
+    <<: *node_base_template
+    container_name: node-3_1
+    environment:
+      - NODE_ID=node-3
+      - NODE_PORT=8000
+
+  node-4:
+    <<: *node_base_template
+    container_name: node-4_1
+    environment:
+      - NODE_ID=node-4
+      - NODE_PORT=8000
+
+  node-5:
+    <<: *node_base_template
+    container_name: node-5_1
+    environment:
+      - NODE_ID=node-5
+      - NODE_PORT=8000
+      - NODE_5_FAULT=500-error  # <-- CRITICAL FIX: Trigger 500-error fault
+    
+  node-6:
+    <<: *node_base_template
+    container_name: node-6_1
+    environment:
+      - NODE_ID=node-6
+      - NODE_PORT=8000
+
+  node-7:
+    <<: *node_base_template
+    container_name: node-7_1
+    environment:
+      - NODE_ID=node-7
+      - NODE_PORT=8000
+
+  node-8:
+    <<: *node_base_template
+    container_name: node-8_1
+    environment:
+      - NODE_ID=node-8
+      - NODE_PORT=8000
+
+  node-9:
+    <<: *node_base_template
+    container_name: node-9_1
+    environment:
+      - NODE_ID=node-9
+      - NODE_PORT=8000
+
+  node-10:
+    <<: *node_base_template
+    container_name: node-10_1
+    environment:
+      - NODE_ID=node-10
+      - NODE_PORT=8000
+
+  node-11:
+    <<: *node_base_template
+    container_name: node-11_1
+    environment:
+      - NODE_ID=node-11
+      - NODE_PORT=8000
+
+  node-12:
+    <<: *node_base_template
+    container_name: node-12_1
+    environment:
+      - NODE_ID=node-12
+      - NODE_PORT=8000
+
+  node-13:
+    <<: *node_base_template
+    container_name: node-13_1
+    environment:
+      - NODE_ID=node-13
+      - NODE_PORT=8000
+
+  node-14:
+    <<: *node_base_template
+    container_name: node-14_1
+    environment:
+      - NODE_ID=node-14
+      - NODE_PORT=8000
+
+  node-15:
+    <<: *node_base_template
+    container_name: node-15_1
+    environment:
+      - NODE_ID=node-15
+      - NODE_PORT=8000
+
+# --- 5. Volumes and Networks ---
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  tw_network:
+    driver: bridge
