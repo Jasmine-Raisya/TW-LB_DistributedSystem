@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # CORRECTED: Files are copied relative to the build context (which is ./lb)
 COPY load_balancer.py .
 
+# 3. Copy ML model artifacts (from parent directory context)
+# These will be copied from the root during build (see docker-compose.yml context mapping)
+COPY artifacts/ ./artifacts/
+
 # Expose the port the load balancer runs on
 EXPOSE 8080
 

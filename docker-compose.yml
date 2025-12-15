@@ -37,11 +37,13 @@ services:
   # --- 3. Trust-Weighted Load Balancer ---
   tw-lb:
     build:
-      context: ./lb
-      dockerfile: Dockerfile
+      context: .  # Changed from ./lb to root to include artifacts/
+      dockerfile: ./lb/Dockerfile
     container_name: ds_project_tw-lb_1
     env_file:
       - ./.env
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
     ports:
       - "8080:8080"
     networks:
