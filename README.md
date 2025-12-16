@@ -7,6 +7,18 @@ This project simulates a small, load-balanced distributed system where Byzantine
 
 The primary objective is to collect labeled training data (system metrics plus ground-truth fault types) to train isolated Machine Learning model (e.g., a Support Vector Machine or SVM) for fault detection weights (Trust Weights), embedded in the Trust Weighted Load Balancer ("TW-LB")
 
+### 🆕 Realistic Simulation Features
+
+The system now includes **realistic node simulation** with:
+- ✅ **Node-specific characteristics** - Each node has unique baseline performance (latency, CPU, network)
+- ✅ **Dynamic workload patterns** - Sinusoidal load variation with traffic spikes
+- ✅ **Network noise** - Gaussian jitter and packet loss simulation
+- ✅ **Resource usage metrics** - CPU and memory patterns with realistic noise
+- ✅ **Probabilistic Byzantine faults** - Faults occur with probability, not deterministically
+- ✅ **Time-based evolution** - Node behavior changes over time
+
+**📖 See [GETTING_STARTED_SIMULATION.md](GETTING_STARTED_SIMULATION.md) for detailed usage guide**
+
 ---
 
 ## Setup and Installation Guide

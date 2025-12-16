@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 # --- CONFIGURATION ---
 load_dotenv(dotenv_path='../.env', override=True)
+# Ensure the hostname here matches the Prometheus SERVICE name in docker-compose.yml
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090")
 
 # Artifact paths
@@ -23,13 +24,20 @@ ENCODER_FILE = os.path.join(ARTIFACTS_DIR, 'label_encoder.joblib')
 # Node configuration
 NODES = [f"node-{i}" for i in range(1, 16)]
 
+# Debug configuration
+DEBUG = True  # Set to False to disable debug logging
+
 # CRITICAL: These MUST match the training script exactly
 REQUIRED_FEATURES = ['latency_ms', 'error_500_count', 'cpu_usage_rate', 'resident_mem_mb']
 
 # --- PROMETHEUS QUERY HELPERS ---
 
 def get_instant_pql_query(node: str, metric_type: str) -> str:
-    """Generates instant PQL queries for the latest metric values."""
+    """
+    Generates instant PQL queries for the latest metric values.
+    Updated to use the new realistic simulation metrics: node_cpu_usage_percent and node_memory_mb.
+    NOTE: Removed the 'default 0' operator due to Prometheus version incompatibility.
+    """
     target_instance = f'{node}:8000'
     
     queries = {
@@ -40,15 +48,33 @@ def get_instant_pql_query(node: str, metric_type: str) -> str:
         'error_count': f'''
             sum(increase(http_requests_total{{instance="{target_instance}", status="500"}}[10s]))
         ''',
+        # UPDATED: Use new realistic simulation metrics
         'cpu': f'''
-            rate(process_cpu_seconds_total{{instance="{target_instance}"}}[5s])
+            node_cpu_usage_percent{{instance="{target_instance}"}} / 100
         ''',
         'memory': f'''
-            process_resident_memory_bytes{{instance="{target_instance}"}}
+            node_memory_mb{{instance="{target_instance}"}} * 1024 * 1024
         '''
     }
     
     return queries.get(metric_type, '')
+
+# --- HELPER FUNCTION FOR SAFE METRIC EXTRACTION ---
+
+def safe_extract_metric(result: List) -> float:
+    """
+    Safely extracts the metric value (float) from the Prometheus API result format,
+    returning 0.0 if the result list is empty or the value is missing.
+    """
+    # Result format: [{'metric': {...}, 'value': [timestamp, 'value']}]
+    if result and result[0].get('value') and len(result[0]['value']) > 1:
+        try:
+            return float(result[0]['value'][1])
+        except (ValueError, TypeError):
+            # Should not happen if data is numeric, but good for safety
+            return 0.0
+    return 0.0
+
 
 # --- TRUST WEIGHT LOAD BALANCER ---
 
@@ -91,29 +117,32 @@ class TrustWeightLoadBalancer:
             self.prom = None
 
     def _fetch_node_metrics(self, node: str) -> Dict[str, float]:
-        """Fetch latest metrics for a single node from Prometheus."""
+        """Fetch latest metrics for a single node from Prometheus using safe extraction."""
         if not self.prom:
             return None
             
         try:
             metrics = {}
             
-            # Fetch latency
+            # Fetch latency (Made resilient in PQL)
             latency_result = self.prom.custom_query(get_instant_pql_query(node, 'latency'))
-            metrics['avg_latency_seconds'] = float(latency_result[0]['value'][1]) if latency_result else 0.0
+            metrics['avg_latency_seconds'] = safe_extract_metric(latency_result)
             
-            # Fetch error count
+            # Fetch error count (Made resilient in PQL)
             error_result = self.prom.custom_query(get_instant_pql_query(node, 'error_count'))
-            metrics['error_count'] = float(error_result[0]['value'][1]) if error_result else 0.0
+            metrics['error_count'] = safe_extract_metric(error_result)
             
-            # Fetch CPU
+            # Fetch CPU (Made resilient in PQL)
             cpu_result = self.prom.custom_query(get_instant_pql_query(node, 'cpu'))
-            metrics['cpu_usage_rate'] = float(cpu_result[0]['value'][1]) if cpu_result else 0.0
+            metrics['cpu_usage_rate'] = safe_extract_metric(cpu_result)
             
-            # Fetch memory (convert bytes to MB)
+            # Fetch memory (Made resilient in PQL)
             memory_result = self.prom.custom_query(get_instant_pql_query(node, 'memory'))
-            memory_bytes = float(memory_result[0]['value'][1]) if memory_result else 0.0
+            memory_bytes = safe_extract_metric(memory_result)
             metrics['resident_mem_mb'] = memory_bytes / (1024 * 1024)
+            
+            if DEBUG:
+                print(f"DEBUG METRICS ({node}): {metrics}")
             
             return metrics
             
@@ -159,22 +188,28 @@ class TrustWeightLoadBalancer:
             # predict_proba returns [[P(benign), P(faulty)]]
             probabilities = self.model.predict_proba(X_scaled)[0]
             
-            # Get index of 'faulty' class (could be 0 or 1 depending on label encoding)
-            try:
-                fault_idx = list(self.label_encoder.classes_).index('delay')  # or 'faulty'
-            except ValueError:
-                # If 'delay' not found, try other common fault names
-                fault_class_candidates = ['delay', 'faulty', 'crash', '500-error']
-                fault_idx = None
-                for candidate in fault_class_candidates:
-                    if candidate in self.label_encoder.classes_:
-                        fault_idx = list(self.label_encoder.classes_).index(candidate)
-                        break
-                if fault_idx is None:
-                    fault_idx = 1  # Default to second class
+            # Determine which class index represents "faulty"
+            fault_idx = None
+            fault_class_name = None
+            fault_class_candidates = ['faulty', 'delay', '500-error']  # Common fault class names
+            
+            for candidate in fault_class_candidates:
+                if candidate in self.label_encoder.classes_:
+                    fault_idx = list(self.label_encoder.classes_).index(candidate)
+                    fault_class_name = candidate
+                    break
+            
+            if fault_idx is None:
+                # Fallback: assume the class with the highest index is the fault class
+                fault_idx = len(self.label_encoder.classes_) - 1 
+                fault_class_name = list(self.label_encoder.classes_)[fault_idx]
             
             p_faulty = probabilities[fault_idx]
             
+            # Debug logging (controlled by DEBUG flag)
+            if DEBUG:
+                print(f"DEBUG PREDICT ({node_id}): Features={feature_df['error_500_count'].iloc[0]:.2f} (Error), P_Faulty({fault_class_name})={p_faulty:.3f}, Classes={list(self.label_encoder.classes_)}")
+
             # Apply trust weighting formula
             if p_faulty < 0.20:
                 tw = 1.0
@@ -258,8 +293,13 @@ def route_request():
         strategy = "TWLB" if twlb.model_loaded else "RR"
         print(f"\n[{time.strftime('%H:%M:%S')}] --- WEIGHTS UPDATED ({strategy}) ---")
         weights_display = twlb.get_distribution_weights()
-        # Only show non-zero weights for cleaner output
-        active_weights = {k: v for k, v in weights_display.items() if v > 0.0}
+        # Only show non-default weights for cleaner output
+        active_weights = {k: v for k, v in weights_display.items() if v < 1.0}
+        
+        # If no weights have dropped, show all weights
+        if not active_weights:
+             active_weights = weights_display 
+
         print(f"Active Weights: {active_weights}")
         print("-" * 60)
     
