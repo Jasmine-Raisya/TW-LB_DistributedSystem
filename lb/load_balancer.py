@@ -42,8 +42,8 @@ def get_instant_pql_query(node: str, metric_type: str) -> str:
     
     queries = {
         'latency': f'''
-            avg_over_time(request_latency_seconds_sum{{instance="{target_instance}", status="200"}}[5s]) / 
-            avg_over_time(request_latency_seconds_count{{instance="{target_instance}", status="200"}}[5s])
+            avg_over_time(request_latency_seconds_sum{{instance="{target_instance}"}}[5s]) / 
+            avg_over_time(request_latency_seconds_count{{instance="{target_instance}"}}[5s])
         ''',
         'error_count': f'''
             sum(increase(http_requests_total{{instance="{target_instance}", status="500"}}[10s]))
@@ -210,13 +210,13 @@ class TrustWeightLoadBalancer:
             if DEBUG:
                 print(f"DEBUG PREDICT ({node_id}): Features={feature_df['error_500_count'].iloc[0]:.2f} (Error), P_Faulty({fault_class_name})={p_faulty:.3f}, Classes={list(self.label_encoder.classes_)}")
 
-            # Apply trust weighting formula
+            # Apply trust weighting formula (AGGRESSIVE MODE)
             if p_faulty < 0.20:
                 tw = 1.0
-            elif p_faulty < 0.60:
+            elif p_faulty < 0.50:  # Stricter threshold (was 0.60)
                 tw = 0.5
             else:
-                tw = 0.1
+                tw = 0.01 # Aggressive penalty (was 0.1) -> Virtually bans the node
                 
             return tw
             
@@ -269,7 +269,7 @@ class TrustWeightLoadBalancer:
 
 # --- MAIN ROUTING LOGIC ---
 
-REQUEST_INTERVAL_SECONDS = 0.5
+REQUEST_INTERVAL_SECONDS = 0.05
 WEIGHT_UPDATE_INTERVAL_SECONDS = 5.0
 
 # Initialize load balancer

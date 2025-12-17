@@ -9,15 +9,15 @@ FAULT_TYPES=("crash" "delay" "500-error")
 # --- Cleanup previous environment and logs ---
 echo "1. Shutting down existing containers and cleaning up..."
 # Use 'down -v' to clean up all volumes/networks and ensure a fresh start
-docker compose down #EDITED HERE RAISYA
+docker compose down
 
 # --- Select Random Faulty Nodes ---
 # 1. Create an array of node IDs (1 to 15)
 NODE_IDS=($(seq 1 $TOTAL_NODES))
 
 # 2. Shuffle the array and pick the first $FAULTY_COUNT (3) nodes
-# This selects 3 random indices without replacement
-RANDOM_FAULTY_NODES=($(shuf -e "${NODE_IDS[@]}" -n $FAULTY_COUNT))
+# macOS compatible shuffle using sort -R instead of shuf
+RANDOM_FAULTY_NODES=($(printf '%s\n' "${NODE_IDS[@]}" | sort -R | head -n $FAULTY_COUNT))
 
 # --- Prepare Environment Variables ---
 # Remove any old .env file
@@ -26,23 +26,19 @@ rm -f ./.env
 echo "2. Randomly selected Byzantine nodes for this run (3/15): ${RANDOM_FAULTY_NODES[@]}"
 echo "3. Generating .env file with FAULT_TYPE assignments..."
 
-# Initialize all nodes as benign
-declare -A FAULT_ASSIGNMENTS
+# Initialize all nodes as benign (without associative arrays - bash 3.2 compatible)
 for i in "${NODE_IDS[@]}"; do
-    FAULT_ASSIGNMENTS[$i]="benign"
+    echo "NODE_${i}_FAULT=benign" >> ./.env
 done
 
 # Assign a random fault type to the selected faulty nodes
-for i in "${RANDOM_FAULTY_NODES[@]}"; do
-    # Pick a random fault type (crash or delay)
-    # The 'random' variable is an internal Bash variable
+for node_id in "${RANDOM_FAULTY_NODES[@]}"; do
+    # Pick a random fault type
     RANDOM_FAULT_TYPE=${FAULT_TYPES[$RANDOM % ${#FAULT_TYPES[@]}]}
-    FAULT_ASSIGNMENTS[$i]=$RANDOM_FAULT_TYPE
-done
-
-# Write assignments to a temporary .env file
-for i in "${NODE_IDS[@]}"; do
-    echo "NODE_${i}_FAULT=${FAULT_ASSIGNMENTS[$i]}" >> ./.env
+    
+    # Update the .env file for this specific node
+    # Use temp file for macOS sed compatibility
+    sed -i '' "s/NODE_${node_id}_FAULT=benign/NODE_${node_id}_FAULT=${RANDOM_FAULT_TYPE}/" ./.env
 done
 
 # --- Start Docker Compose ---

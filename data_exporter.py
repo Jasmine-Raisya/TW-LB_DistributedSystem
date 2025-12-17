@@ -6,13 +6,13 @@ import os
 import re
 
 # --- Configuration ---
-PROMETHEUS_URL = "http://localhost:9090"
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
 NODES = [f"node-{i}" for i in range(1, 16)]
 
 # Time range to query (query the last 30 minutes)
 START_TIME = datetime.now() - timedelta(minutes=30) 
 END_TIME = datetime.now()
-STEP_SIZE = '1m' # Get a data point every 1 minute
+STEP_SIZE = '15s' # Get a data point every 15 seconds for valid statistical sample size
 
 # --- New Function: Get Fault Map from Host Environment ---
 def get_fault_map():
@@ -45,12 +45,11 @@ def get_pql_queries(node):
     """
     target_instance = f'{node}:8000' 
     
-    # Query 1: Average Latency (Now filtering for only Status 200 responses)
-    # This ensures we get a cleaner latency reading by excluding failed requests.
+    # Query 1: Average Latency (histogram doesn't have status label)
     latency_query = f"""
-    avg_over_time(request_latency_seconds_sum{{instance="{target_instance}", status="200"}}[{STEP_SIZE}]) 
+    avg_over_time(request_latency_seconds_sum{{instance="{target_instance}"}}[{STEP_SIZE}]) 
     / 
-    avg_over_time(request_latency_seconds_count{{instance="{target_instance}", status="200"}}[{STEP_SIZE}])
+    avg_over_time(request_latency_seconds_count{{instance="{target_instance}"}}[{STEP_SIZE}])
     """
     
     # Query 2: 500 Error Count (RAW COUNT FOR VERIFICATION)
@@ -59,14 +58,14 @@ def get_pql_queries(node):
     sum(increase(http_requests_total{{instance="{target_instance}", status="500"}}[{STEP_SIZE}]))
     """
 
-    # Query 3: CPU Usage (Percentage)
+    # Query 3: CPU Usage (use the realistic simulation metric)
     cpu_query = f"""
-    rate(process_cpu_seconds_total{{instance="{target_instance}"}}[{STEP_SIZE}])
+    node_cpu_usage_percent{{instance="{target_instance}"}} / 100
     """
     
-    # Query 4: Memory Usage (Bytes - focusing on Resident Set Size, RSS)
+    # Query 4: Memory Usage (use the realistic simulation metric, convert to MB)
     memory_query = f"""
-    process_resident_memory_bytes{{instance="{target_instance}"}}
+    node_memory_mb{{instance="{target_instance}"}}
     """
     
     return latency_query, error_count_query, cpu_query, memory_query # RETURN ALL FOUR QUERIES
@@ -128,8 +127,8 @@ def fetch_metrics():
             node_fault_type = fault_map.get(node, 'benign')
             
             for timestamp in all_timestamps:
-                # Convert memory from bytes to Megabytes (for easier reading)
-                mem_mb = memory_values.get(timestamp, 0.0) / (1024 * 1024)
+                # Memory is already in MB from the query
+                mem_mb = memory_values.get(timestamp, 0.0)
                 
                 # Use the presence of 500 errors to inform the status code column
                 status_code = 500 if error_count_values.get(timestamp, 0) > 0 else 200

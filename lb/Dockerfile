@@ -8,15 +8,15 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # 1. Install dependencies
-# CORRECTED: Files are copied relative to the build context (which is ./lb)
-COPY requirements.txt .
+# Build context is root (.), so we need to reference lb/ subdirectory
+COPY lb/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 2. Copy the application files
-# CORRECTED: Files are copied relative to the build context (which is ./lb)
-COPY load_balancer.py .
+# Build context is root (.), so we need to reference lb/ subdirectory
+COPY lb/load_balancer.py .
 
-# 3. Copy ML model artifacts (from parent directory context)
+# 3. Copy ML model artifacts (from root directory)
 # These will be copied from the root during build (see docker-compose.yml context mapping)
 COPY artifacts/ ./artifacts/
 

@@ -3,19 +3,13 @@ version: '3.8'
 services:
   # --- 1. Prometheus Monitoring Server ---
   prometheus:
-    image: prom/prometheus:v2.47.0
+    build: ./monitoring
     container_name: prometheus_1
-    volumes:
-      # CORRECT CONFIG PATH: Maps your host's ./monitoring/prometheus.yml 
-      # to the container's expected config path.
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      # DATA VOLUME: Maps a persistent Docker volume for data storage.
-      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
     ports:
-      - "9090:9090"
+      - "9094:9090"
     networks:
       - tw_network
     depends_on:
@@ -37,7 +31,7 @@ services:
   # --- 3. Trust-Weighted Load Balancer ---
   tw-lb:
     build:
-      context: .  # Changed from ./lb to root to include artifacts/
+      context: . # Changed from ./lb to root to include artifacts/
       dockerfile: ./lb/Dockerfile
     container_name: ds_project_tw-lb_1
     env_file:
@@ -107,8 +101,8 @@ services:
     environment:
       - NODE_ID=node-5
       - NODE_PORT=8000
-      - NODE_5_FAULT=500-error  # <-- CRITICAL FIX: Trigger 500-error fault
-    
+      - NODE_5_FAULT=500-error # <-- CRITICAL FIX: Trigger 500-error fault
+
   node-6:
     <<: *node_base_template
     container_name: node-6_1
@@ -183,6 +177,7 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+
 
 networks:
   tw_network:
