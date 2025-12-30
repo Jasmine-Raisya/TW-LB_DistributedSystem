@@ -12,8 +12,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 2. Copy the application files
-# Assuming main.py is the application entry point
-COPY main.py .
+# 2. Copy the application files
+# Copy all python files (main.py, byzantine_faults.py, etc.)
+COPY *.py .
 
 # Expose the port the node service runs on
 EXPOSE 8000

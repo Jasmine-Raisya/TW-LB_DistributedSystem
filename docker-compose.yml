@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # --- 1. Prometheus Monitoring Server ---
@@ -14,6 +13,8 @@ services:
       - tw_network
     depends_on:
       - tw-lb
+    volumes:
+      - prometheus_data:/prometheus
 
   # --- 2. Grafana Dashboard ---
   grafana:
@@ -27,6 +28,22 @@ services:
       - tw_network
     depends_on:
       - prometheus
+
+  # --- 3. cAdvisor for REAL Container Metrics ---
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8081:8080"
+    networks:
+      - tw_network
+
 
   # --- 3. Trust-Weighted Load Balancer ---
   tw-lb:
@@ -42,6 +59,8 @@ services:
       - "8080:8080"
     networks:
       - tw_network
+    volumes:
+      - ./artifacts:/app/artifacts
     # Dynamically depend on all 15 nodes
     depends_on:
       - node-1

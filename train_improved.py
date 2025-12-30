@@ -8,8 +8,11 @@ from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, classification_report
 from sklearn.multiclass import OneVsRestClassifier
 
+import glob
+
 # --- Configuration ---
-FILE_NAME = "byzantine_training_data_20251215_203025.csv"
+# FILE_NAME is now auto-detected, favoring the automated dataset
+DEFAULT_FILE_PATTERN = "byzantine_training_data_automated.csv"
 # Output paths - save to artifacts directory for Docker integration
 ARTIFACTS_DIR = './artifacts'
 MODEL_FILENAME = os.path.join(ARTIFACTS_DIR, 'tw_lb_svm_model.joblib')
@@ -125,10 +128,14 @@ def train_and_evaluate_svm(X, y, label_encoder):
     f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
     
     try:
-        roc_auc = roc_auc_score(y_test, y_proba, multi_class='ovr', average='weighted')
-    except ValueError:
+        n_classes = len(np.unique(y_test))
+        if n_classes == 2:
+            roc_auc = roc_auc_score(y_test, y_proba[:, 1], average='weighted')
+        else:
+            roc_auc = roc_auc_score(y_test, y_proba, multi_class='ovr', average='weighted')
+    except Exception as e:
         roc_auc = 0.0
-        print("Warning: ROC-AUC could not be calculated (possibly only one class in test set).")
+        print(f"Warning: ROC-AUC could not be calculated: {e}")
 
     print("\n--- Optimized SVM Model Performance ---")
     print(f"Accuracy: {accuracy:.4f}")
@@ -156,12 +163,23 @@ if __name__ == "__main__":
     # !pip install scikit-learn joblib pandas -qq
     
     try:
-        if os.path.exists(FILE_NAME):
-            X, y, le, features = load_and_prepare_data(FILE_NAME)
+        # Priority 1: Check for the automated aggregation file
+        target_file = "byzantine_training_data_automated.csv"
+        
+        # Priority 2: Fallback to the latest timestamped file if automated is missing
+        if not os.path.exists(target_file):
+            import glob
+            files = glob.glob("byzantine_training_data_*.csv")
+            files.sort(key=os.path.getmtime, reverse=True)
+            target_file = files[0] if files else None
+        
+        if target_file and os.path.exists(target_file):
+            print(f"Using training file: {target_file}")
+            X, y, le, features = load_and_prepare_data(target_file)
             if X is not None:
                 train_and_evaluate_svm(X, y, le)
         else:
-            print(f"File {FILE_NAME} not found. Please upload the dataset.")
+            print(f"No training data found (checked 'byzantine_training_data_automated.csv' and pattern 'byzantine_training_data_*.csv')")
             
     except Exception as e:
         print(f"\nAn unexpected error occurred during execution: {e}")

@@ -9,6 +9,8 @@ from typing import Dict, List
 from prometheus_api_client import PrometheusConnect
 from datetime import datetime
 from dotenv import load_dotenv
+import psutil
+from prometheus_client import start_http_server, Gauge, Counter
 
 # --- CONFIGURATION ---
 load_dotenv(dotenv_path='../.env', override=True)
@@ -35,29 +37,32 @@ REQUIRED_FEATURES = ['latency_ms', 'error_500_count', 'cpu_usage_rate', 'residen
 def get_instant_pql_query(node: str, metric_type: str) -> str:
     """
     Generates instant PQL queries for the latest metric values.
-    Updated to use the new realistic simulation metrics: node_cpu_usage_percent and node_memory_mb.
-    NOTE: Removed the 'default 0' operator due to Prometheus version incompatibility.
+    Uses REAL metrics collected via psutil inside the nodes.
+    This replaces cAdvisor queries which are unreliable on some Docker/Windows environments.
     """
-    target_instance = f'{node}:8000'
+    label_selector = f'node_id="{node}"'
     
     queries = {
         'latency': f'''
-            avg_over_time(request_latency_seconds_sum{{instance="{target_instance}"}}[5s]) / 
-            avg_over_time(request_latency_seconds_count{{instance="{target_instance}"}}[5s])
+            avg_over_time(request_latency_seconds_sum{{{label_selector}}}[5s]) / 
+            avg_over_time(request_latency_seconds_count{{{label_selector}}}[5s])
         ''',
         'error_count': f'''
-            sum(increase(http_requests_total{{instance="{target_instance}", status="500"}}[10s]))
+            sum(increase(lb_routed_requests_total{{selected_node="{node}", status!="200"}}[10s]))
         ''',
-        # UPDATED: Use new realistic simulation metrics
+        # REAL CPU usage (measured via psutil in the node)
         'cpu': f'''
-            node_cpu_usage_percent{{instance="{target_instance}"}} / 100
+            node_cpu_usage_percent{{{label_selector}}} / 100
         ''',
+        # REAL memory usage (measured via psutil in the node)
         'memory': f'''
-            node_memory_mb{{instance="{target_instance}"}} * 1024 * 1024
+            node_memory_mb{{{label_selector}}} * 1024 * 1024
         '''
     }
     
     return queries.get(metric_type, '')
+
+
 
 # --- HELPER FUNCTION FOR SAFE METRIC EXTRACTION ---
 
@@ -188,36 +193,53 @@ class TrustWeightLoadBalancer:
             # predict_proba returns [[P(benign), P(faulty)]]
             probabilities = self.model.predict_proba(X_scaled)[0]
             
-            # Determine which class index represents "faulty"
-            fault_idx = None
-            fault_class_name = None
-            fault_class_candidates = ['faulty', 'delay', '500-error']  # Common fault class names
-            
-            for candidate in fault_class_candidates:
-                if candidate in self.label_encoder.classes_:
-                    fault_idx = list(self.label_encoder.classes_).index(candidate)
-                    fault_class_name = candidate
-                    break
-            
-            if fault_idx is None:
-                # Fallback: assume the class with the highest index is the fault class
-                fault_idx = len(self.label_encoder.classes_) - 1 
-                fault_class_name = list(self.label_encoder.classes_)[fault_idx]
-            
-            p_faulty = probabilities[fault_idx]
-            
-            # Debug logging (controlled by DEBUG flag)
-            if DEBUG:
-                print(f"DEBUG PREDICT ({node_id}): Features={feature_df['error_500_count'].iloc[0]:.2f} (Error), P_Faulty({fault_class_name})={p_faulty:.3f}, Classes={list(self.label_encoder.classes_)}")
-
-            # Apply trust weighting formula (AGGRESSIVE MODE)
-            if p_faulty < 0.20:
-                tw = 1.0
-            elif p_faulty < 0.50:  # Stricter threshold (was 0.60)
-                tw = 0.5
-            else:
-                tw = 0.01 # Aggressive penalty (was 0.1) -> Virtually bans the node
+            # --- UNIVERSAL TRUST DETECTION ---
+            # Instead of looking for specific faults, we measure "HEALTHINESS"
+            try:
+                # Get P(Faulty) = 1 - P(Benign)
+                benign_idx = list(self.label_encoder.classes_).index('benign')
+                p_benign = probabilities[benign_idx]
+                p_faulty = 1.0 - p_benign
                 
+                # Graceful Degradation Logic
+                # Avoid harsh penalties for low-confidence detections
+                if p_faulty < 0.20:
+                    return 1.0  # High trust
+                elif p_faulty >= 0.20 and p_faulty < 0.70:
+                    return 0.5  # Suspicious: reduced weight but not quarantined
+                else:
+                    return 0.01 # High confidence fault: Quarantine
+                    
+            except ValueError:
+                # Fallback if 'benign' class not found (should not happen)
+                print("⚠ Error: 'benign' class not found in model")
+                return 0.5
+            except ValueError:
+                # Fallback: if 'benign' label is missing, assume the highest prob class is NOT benign
+                p_benign = probabilities[0] 
+
+            # Trust Weight logic based on P(Benign)
+            # This allows for REHABILITATION: if a node stops failing, its P(Benign) will 
+            # increase, and it will eventually gain back its 1.0 weight.
+            if p_benign > 0.80:
+                tw = 1.0    # High trust (Benign)
+            elif p_benign > 0.40:
+                tw = 0.4    # Suspicious (Throttle)
+            else:
+                tw = 0.01   # Probable Byzantine or Unresponsive (Quarantine)
+
+            # --- DYNAMIC RECOVERY LOGGING ---
+            if DEBUG:
+                best_class_idx = probabilities.argmax()
+                best_class = self.label_encoder.classes_[best_class_idx]
+                print(f"DEBUG PREDICT ({node_id}): P(Benign)={p_benign:.3f}, Top Prediction={best_class} ({probabilities[best_class_idx]:.2f})")
+                
+                # Check for rehabilitation (if weight was low and is now high)
+                if tw > 0.5 and self.weights.get(node_id, 1.0) < 0.2:
+                    print(f"✅ REHABILITATION: {node_id} has recovered and is restored to full trust!")
+
+            return tw
+
             return tw
             
         except Exception as e:
@@ -272,9 +294,32 @@ class TrustWeightLoadBalancer:
 REQUEST_INTERVAL_SECONDS = 0.05
 WEIGHT_UPDATE_INTERVAL_SECONDS = 5.0
 
+# --- SELF-MONITORING METRICS ---
+LB_CPU_USAGE = Gauge('lb_cpu_usage_percent', 'CPU usage of the load balancer itself')
+LB_MEMORY_USAGE = Gauge('lb_memory_mb', 'Memory usage of the load balancer itself in MB')
+LB_REQUESTS_TOTAL = Counter('lb_routed_requests_total', 'Total requests routed by the load balancer', ['selected_node', 'status'])
+
+def update_lb_self_metrics():
+    """Update CPU and Memory metrics for the load balancer itself."""
+    try:
+        cpu = psutil.cpu_percent()
+        memory_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+        LB_CPU_USAGE.set(cpu)
+        LB_MEMORY_USAGE.set(memory_mb)
+    except Exception as e:
+        if DEBUG:
+            print(f"DEBUG: Failed to update self-metrics: {e}")
+
 # Initialize load balancer
 twlb = TrustWeightLoadBalancer(NODES)
 last_weight_update_time = 0
+
+# Start metrics server on port 8080
+try:
+    start_http_server(8080)
+    print("✓ Prometheus metrics server started on port 8080")
+except Exception as e:
+    print(f"⚠ WARNING: Could not start metrics server: {e}")
 
 
 def route_request():
@@ -283,6 +328,23 @@ def route_request():
     Periodically updates trust weights based on Prometheus metrics.
     """
     global last_weight_update_time
+    
+    def validate_response(response) -> bool:
+        """Check if response contains valid, non-corrupted data."""
+        try:
+            data = response.json()
+            # 1. Check logical status
+            if data.get("status") != "ok": 
+                return False
+            # 2. Check for required keys (incorrect_response faults often miss these)
+            if "request_num" not in data:
+                return False
+            # 3. Check for conflicting info
+            if data.get("healthy") is False:
+                return False
+            return True
+        except ValueError:
+            return False  # Not valid JSON
     
     # Periodic trust weight update
     current_time = time.time()
@@ -310,11 +372,31 @@ def route_request():
     # Send request
     try:
         response = requests.get(f"http://{selected_node}:8000/process", timeout=5.0)
-        print(f"[{time.strftime('%H:%M:%S')}] {selected_node} ({strategy}) | Status: {response.status_code}")
+        status_code = str(response.status_code)
+        
+        # --- ACTIVE BYZANTINE VALIDATION ---
+        # Don't just trust the status code. Check the content.
+        is_valid = True
+        if status_code == "200":
+             is_valid = validate_response(response)
+        
+        final_status = status_code
+        if not is_valid:
+             final_status = "validation_error"  # Treated as non-200 by SVM
+             print(f"[{time.strftime('%H:%M:%S')}] {selected_node} ({strategy}) | ⚠ VALIDATION FAILED (Lying Node Detected)")
+        else:
+             print(f"[{time.strftime('%H:%M:%S')}] {selected_node} ({strategy}) | Status: {status_code}")
+
+        LB_REQUESTS_TOTAL.labels(selected_node=selected_node, status=final_status).inc()
     except requests.exceptions.Timeout:
         print(f"[{time.strftime('%H:%M:%S')}] {selected_node} ({strategy}) | TIMEOUT")
+        LB_REQUESTS_TOTAL.labels(selected_node=selected_node, status="timeout").inc()
     except requests.exceptions.RequestException as e:
         print(f"[{time.strftime('%H:%M:%S')}] {selected_node} ({strategy}) | ERROR: {type(e).__name__}")
+        LB_REQUESTS_TOTAL.labels(selected_node=selected_node, status="error").inc()
+    
+    # Update self-metrics periodically
+    update_lb_self_metrics()
 
 
 if __name__ == "__main__":

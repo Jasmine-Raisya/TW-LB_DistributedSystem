@@ -1,7 +1,50 @@
-venv/
+# Python
 __pycache__/
-*.csv
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
 .env
-.DS_Store
-artifacts/
+
+# Experiment Data & Results
+experiment_results/
+evaluation_results/
+report/
+*.csv
 system_metrics.json
+
+# ML Artifacts (Keep essential models for the LB)
+# We ignore the directory but expose the joblib files needed for immediate run
+artifacts/*
+!artifacts/*.joblib
+
+# Documentation (Ignore internal logs/summaries)
+# Public should only see the main README, methodology and run guide
+*.md
+!README.md
+!methodology_and_results.md
+!CLONE_AND_RUN.md
+!DS_Proposal.md
+
+# Development & Debug Scripts
+debug_*.py
+test_*.py
+check_*.py
+verify_*.sh
+run_*.sh
+collect_*.sh
+start_*.sh
+*.ipynb
+analyze_*.py
+augment_*.py
+benchmark_*.py
+train_simple.py
+train_validated.py
+pilot_*.py
+setup_and_start.py
+test_simulation.py
+analyze_simulation.py
+
+# Docker
+.DS_Store
