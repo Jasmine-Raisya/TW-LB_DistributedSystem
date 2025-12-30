@@ -1,41 +1,69 @@
-# TW-LB: Trust-Weighted Load Balancing for Byzantine Resilience
+# TW-LB: Trust-Weighted Load Balancer Implementation
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Docker: Ready](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
+## Research Overview
+This repository contains the core implementation of the **Trust-Weighted Load Balancer (TW-LB)**, a machine learning-driven solution for Byzantine fault mitigation in distributed edge systems. The system employs **Support Vector Machine (SVM)** classification to compute real-time trust scores for worker nodes, enabling adaptive traffic routing that isolates potentially malicious components while maintaining system availability.
 
-**TW-LB** is a research-focused distributed system simulator designed to enhance Byzantine fault tolerance in resource-constrained edge/IoT environments. It leverages Machine Learning (SVM) to detect sophisticated adversarial behaviors—including timing attacks and subtle data corruption—and dynamically adjusts traffic routing to preserve system integrity.
+## Architecture Components
 
-## 🌟 Key Research Objectives
+### Core Modules
+- **`lb/load_balancer.py`** - Main load balancing service with integrated SVM inference and dynamic weight adjustment.
+- **`svm_evaluator.py`** - Machine learning pipeline for fault detection and trust score calculation.
+- **`node/byzantine_faults.py`** - Comprehensive Byzantine behavior implementations for experimental validation.
+- **`scenario_runner.py`** - Automated experimentation framework for systematic evaluation.
+- **`advanced_ratio_tester.py`** - Statistical evaluation suite for multi-iteration ratio testing.
+- **`data_exporter.py`** - Metrics collection and real-time monitoring interface for Prometheus.
 
-1.  **Byzantine Detection via External Observation**: Proving that Load Balancer-observed metrics are superior to node self-reporting for identifying malicious actors.
-2.  **Probabilistic Trust Weighting**: Implementing a "Graceful Degradation" strategy that quarantines high-probability attackers while buffering suspicious nodes.
-3.  **Low-Overhead Resilience**: Maintaining high availability (< 3% node error rate) with minimal CPU (< 4%) and memory footprint.
+### Infrastructure Configuration
+- **`docker-compose.yml`** - Complete container orchestration for the 15-node test environment.
+- **`requirements.txt`** - Python dependencies and version specifications.
+- **`monitoring/prometheus.yml`** - Metrics collection and time-series data configuration.
 
-## 🏗️ System Architecture
+## System Requirements
+- **Python**: 3.9+
+- **Docker & Docker Compose**: Latest stable release
+- **Memory**: Minimum 4GB RAM (8GB recommended)
+- **Storage**: 2GB available disk space
 
-The project utilizes a containerized microservices stack:
-- **Load Balancer**: Python-based gateway with an embedded SVM inference engine.
-- **Worker Nodes (x15)**: Backend services with randomized Byzantine fault injectors.
-- **Monitoring**: Prometheus-driven metrics collection pipeline.
+## Quick Deployment
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
 
-## 📊 Performance at a Glance
+# 2. Launch complete test environment
+docker-compose up -d
 
-| Metric | Target | **Result (TW-LB)** |
-|:-------|:-------|:-------------------|
-| **ROC-AUC** | > 0.90 | **0.9856** |
-| **F1-Score** | > 0.80 | **0.9135** |
-| **Precision** | > 0.90 | **1.0000** (Zero False Positives) |
+# 3. Execute baseline validation
+python scenario_runner.py --scenario baseline
 
-## 🚀 Getting Started
+# 4. Monitor system metrics (optional)
+# Access Prometheus: http://localhost:9094
+# Access Load Balancer: http://localhost:8080/health
+```
 
-To replicate our research findings or test your own Byzantine mitigation strategies, please see our dedicated execution guide:
+## Experimental Validation
+The implementation includes configurable Byzantine fault injection with three sophistication levels:
+- **Subtle Data Corruption**: Numeric value manipulation (±10%).
+- **Strategic Timing Attacks**: Selective response delays on critical operations.
+- **Advanced Mixed Behaviors**: Comprehensive attack combinations for robustness testing.
 
-👉 **[CLONE_AND_RUN.md](CLONE_AND_RUN.md)**
+## Key Features
+- **Real-time Trust Scoring**: SVM-based probability estimates updated every 10 seconds.
+- **Weighted Traffic Distribution**: Probabilistic routing based on computed trust weights (Tiered: Trusted/Suspicious/Quarantine).
+- **External Observation**: Metrics collected from the load balancer perspective to prevent node deception.
+- **Statistical Rigor**: Support for multi-iteration experimental protocols with Mean, SD, and CI95 calculation.
 
-## 📖 Documentation
+## Research Context
+This implementation corresponds to the research paper *"Trust-Weighted Load Balancing: ML-Driven Byzantine Mitigation for Edge Systems"* submitted for peer review. The system demonstrates:
+- Byzantine fault detection with **ROC-AUC > 0.98**
+- **Zero false positive** operation (Precision = 1.0)
+- Error containment **below 3%** even with 20% adversarial nodes
+- Computational overhead **under 3.2% CPU utilization**
 
-- **[methodology_and_results.md](methodology_and_results.md)**: Comprehensive deep dive into the research methodology, SVM feature engineering, and detailed statistical analysis of experiment outcomes.
+## Citation
+If using this implementation in academic work, please reference the associated research publication *(citation to be added upon acceptance)*.
+
+## License
+**Research Implementation** - For academic and evaluation use only.
 
 ---
-*Created as part of Advanced Agentic Coding Research for Distributed Systems.*
+*Note: Complete experimental datasets, detailed results analysis, and the full research paper are available per request. This repository contains the reference implementation necessary for technical validation and reproducibility assessment.*
